@@ -76,6 +76,13 @@ echo "Disabling root login in SSH..."
 sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin no/g' /etc/ssh/sshd_config
 sudo systemctl restart ssh
 
+# Harden SSH configuration
+sudo sed -i '/Port/c\ Port 22' /etc/ssh/sshd_config
+sudo sed -i '/Protocol/c\ Protocol 2' /etc/ssh/sshd_config
+sudo sed -i '/HostKeyDSA/c\ HostKeyDSA SHA256:somethingverylongandunique' /etc/ssh/sshd_config
+sudo -i '/RSA/c\ RSA SHA384:otherlongstring' /etc/ssh/sshd_config
+sudo sed -i '/PubkeyAcceptedKeyTypes/c\ PubkeyAcceptedKeyTypes=~/.ssh/id_rsa' /etc/ssh/sshd_config
+
 # Install libpam-cracklib
 echo "Installing libpam-cracklib..."
 sudo apt-get install libpam-cracklib -y
