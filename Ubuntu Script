@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Disable unnecessary services and ports
+sudo systemctl disable sshd
+sudo systemctl stop sshd
+sudo ufw allow ssh
+
+# Configure firewall
+sudo ufw enable
+sudo ufw default deny incoming
+sudo ufw allow http
+sudo ufw allow https
+
+# Harden SSH configuration
+sudo sed -i '/Port/c\ Port 22' /etc/ssh/sshd_config
+sudo sed -i '/Protocol/c\ Protocol 2' /etc/ssh/sshd_config
+sudo sed -i '/HostKeyDSA/c\ HostKeyDSA SHA256:somethingverylongandunique' /etc/ssh/sshd_config
+sudo -i '/RSA/c\ RSA SHA384:otherlongstring' /etc/ssh/sshd_config
+sudo sed -i '/PubkeyAcceptedKeyTypes/c\ PubkeyAcceptedKeyTypes=~/.ssh/id_rsa' /etc/ssh/sshd_config
+
+# Limit maximum number of login attempts
+sudo sed -i '/MaxAuthTries/c\ MaxAuthTries 5' /etc/ssh/sshd_config
+
+# Disable password authentication
+sudo sed -i '/PasswordAuthentication/c\ PasswordAuthentication no' /etc/ssh/sshd_config
+
+# Enforce file permissions
+sudo chmod 700 /home/user/.ssh
+sudo chmod 600 /home/user/.ssh/authorized_keys
+
+# Install and configure Fail2Ban
+sudo apt update
+sudo apt install fail2ban
+sudo nano /etc/fail2ban/jail.local
+echo '[SSHD]' >> /etc/fail2ban/jail.local
+echo 'port    = ssh' >> /etc/fail2ban/jail.local
+echo 'protocol = tcp' >> /etc/fail2ban/jail.local
+echo 'filter  = sshd' >> /etc/fail2ban/jail.local
+echo 'logpath = %(sshd_log)s' >> /etc/fail2ban/jail.local
+echo 'maxretry = 5' >> /etc/fail2ban/jail.local
+sudo systemctl restart fail2ban
+
+# Install and configure SELinux
+sudo apt update
+sudo apt install selinux
+sudo setsebool -P allow_http_on_standard_ports true
+sudo setsebool -P allow_https_on_standard_ports true
+
+# Implement additional security measures
+sudo apt install rkhunter
+sudo rkhunter -C
+sudo apt install clamav
+sudo freshclam
