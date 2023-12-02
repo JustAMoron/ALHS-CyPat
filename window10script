@@ -1,0 +1,143 @@
+# Password Policy
+secedit.exe /configure /db %windir%\securitynew.sdb /cfg %windir%\inf\defltbase.inf /areas SECURITYPOLICY
+$secpass = @{
+    'PasswordHistorySize'   = 24
+    'MaximumPasswordAge'    = 60
+    'MinimumPasswordAge'    = 1
+    'MinimumPasswordLength' = 10
+    'PasswordComplexity'    = 1
+    'ClearTextPassword'     = 0
+}
+$secpass | ForEach-Object { secedit.exe /configure /db %windir%\securitynew.sdb /cfg %windir%\inf\defltbase.inf /areas SECURITYPOLICY /quiet /override /IF @('MinimumPasswordLength', 'PasswordComplexity', 'ClearTextPassword')=$true /IUSER=$true /IUNDEF=$true /IF $_ }
+
+# Lockout Policy
+$lockoutPolicy = @{
+    'LockoutDuration'      = '00:30:00'
+    'LockoutThreshold'     = 10
+    'ResetLockoutCounter'  = '00:30:00'
+}
+$lockoutPolicy | ForEach-Object {
+    secedit.exe /configure /db %windir%\securitynew.sdb /cfg %windir%\inf\defltbase.inf /areas SECURITYPOLICY /quiet /override /IF @('LockoutDuration', 'LockoutThreshold', 'ResetLockoutCounter')=$true /IUSER=$true /IUNDEF=$true /IF $_
+}
+
+# Check user settings
+Get-WmiObject -Class Win32_UserAccount | ForEach-Object {
+    $_.PasswordChangeable = $true
+    $_.PasswordExpires = $true
+    $_.SetPassword('')  # Forces a password change at next logon
+    $_.Put()
+}
+
+# Use SmartScreen online services (Security and Maintenance) = ON
+Set-MpPreference -SubmitSamplesConsent 1
+
+# Wi-Fi Sense (Network & Internet)
+Set-WiFiSense -AllowWiFiHotSpotReporting $false
+Set-WiFiSense -AllowOpenHotSpot $false
+Set-WiFiSense -AllowPaidHotSpot $false
+
+# Turn UAC to max (Change User Account Control Settings)
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'ConsentPromptBehaviorAdmin' -Value 5
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value 1
+
+# Change Adapter settings (Disabling IPv6 and other services)
+$networkInterfaces = Get-NetAdapter
+$networkInterfaces | ForEach-Object {
+    Disable-NetAdapterBinding -Name $_.Name -ComponentID 'ms_msclient', 'ms_server', 'ms_tcpip6', 'ms_lltdio', 'ms_rspndr'
+}
+
+# Disable port 1900 UPnP
+New-Item -Path 'HKLM:\Software\Microsoft\DirectplayNATHelp' -Name 'DPNHUPnP' -Force
+New-ItemProperty -Path 'HKLM:\Software\Microsoft\DirectplayNATHelp\DPNHUPnP' -Name 'UPnPMode' -Value 2 -PropertyType DWord
+
+# Windows Services
+$services = @{
+    'upnphost'               = @{ Status = 'Stopped'; StartupType = 'Disabled' }
+    'Telnet'                 = @{ Status = 'Stopped'; StartupType = 'Disabled' }
+    'SNMPTRAP'               = @{ Status = 'Stopped'; StartupType = 'Disabled' }
+    'eventlog'               = @{ Status = 'Running'; StartupType = 'Automatic' }
+    'RemoteRegistry'         = @{ Status = 'Stopped'; StartupType = 'Disabled' }
+}
+
+$services.GetEnumerator() | ForEach-Object {
+    Set-Service -Name $_.Key -Status $_.Value.Status -StartupType $_.Value.StartupType
+}
+
+# Check Windows features
+$featuresToDisable = @('TelnetClient', 'TelnetServer', 'SNMP', 'RIPListener', 'ClientForNFS', 'Web-Server')
+Disable-WindowsOptionalFeature -FeatureName $featuresToDisable -Online -NoRestart
+
+# Disable SMB v1
+Disable-WindowsOptionalFeature -FeatureName 'SMB1Protocol' -Online
+
+# Shares
+$allowedShares = @('ADMIN$', 'C$', 'IPC$')
+$existingShares = Get-SmbShare | Select-Object -ExpandProperty Name
+$sharesToRemove = $existingShares | Where-Object { $_ -notin $allowedShares }
+$sharesToRemove | ForEach-Object {
+    Remove-SmbShare -Name $_ -Force
+}
+
+# Firewall rules
+$rulesToDisable = @('MSEdge_In', 'Search_In', 'MSNMoney_In', 'MSNSports_In', 'MSNNews_In', 'MSNWeather_In', 'MicrosoftPhotos_In', 'Xbox_In')
+$rulesToDisable | ForEach-Object {
+    Disable-NetFirewallRule -DisplayName $_
+}
+
+# Turning off Tiles
+# Assuming you have a function to turn off tiles
+# Adjust as per your environment
+Turn-OffTiles
+
+# Turn off AutoPlay
+Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers' -Name 'DisableAutoplay' -Value 1
+
+# Run the command “netplwiz”
+Start-Process -FilePath 'netplwiz' -Wait
+
+# Screen Saver
+# Settings…Personalize….Lock Screen...Screen Saver settings=wait 10 min and checkmark “On resume display Logon screen”
+Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\' -Name ScreenSaveActive -Value 1
+Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\' -Name ScreenSaveTimeOut -Value 600
+
+# Configure Auditing
+# Enable auditing for success and failure events
+$auditPolicy = @{
+    "AuditPolicyObject" = 1
+    "AuditSystemEvents" = 1
+    "AuditLogonEvents" = 3
+    "AuditObjectAccess" = 3
+    "AuditPrivilegeUse" = 3
+    "AuditPolicyChange" = 3
+    "AuditAccountManage" = 3
+    "AuditProcessTracking" = 3
+    "AuditDSAccess" = 3
+    "AuditAccountLogon" = 3
+}
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\eventlog\Security" -Name $auditPolicy
+
+# Turn on Windows Defender
+# Check if Windows Defender is disabled
+$defenderStatus = Get-MpPreference | Select-Object -ExpandProperty DisableRealtimeMonitoring
+
+if ($defenderStatus -eq $true) {
+    # Windows Defender is disabled, let's enable it using Group Policy
+
+    # Check if Group Policy module is available
+    if (Get-Module -ListAvailable -Name GroupPolicy -ErrorAction SilentlyContinue) {
+        # Import the Group Policy module
+        Import-Module GroupPolicy
+
+        # Set the registry key to enable Windows Defender
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiSpyware" -Value 0
+
+        # Force Group Policy update
+        gpupdate /force
+
+        Write-Host "Windows Defender has been enabled."
+    } else {
+        Write-Host "Group Policy module not found. Please run the script with administrative privileges."
+    }
+} else {
+    Write-Host "Windows Defender is already enabled."
+}
