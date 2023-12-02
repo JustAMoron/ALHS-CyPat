@@ -1,104 +1,191 @@
-# Password Policy
-secedit.exe /configure /db %windir%\securitynew.sdb /cfg %windir%\inf\defltbase.inf /areas SECURITYPOLICY
-$secpass = @{
-    'PasswordHistorySize'   = 24
-    'MaximumPasswordAge'    = 60
-    'MinimumPasswordAge'    = 1
-    'MinimumPasswordLength' = 10
-    'PasswordComplexity'    = 1
-    'ClearTextPassword'     = 0
+# Set password policy settings
+$passwordPolicy = @{
+    "PasswordHistoryCount" = 24
+    "MaxPasswordAge" = (New-TimeSpan -Days 60).TotalSeconds
+    "MinPasswordAge" = (New-TimeSpan -Days 1).TotalSeconds
+    "MinPasswordLength" = 10
+    "PasswordComplexity" = 1
+    "ClearTextPassword" = 0
 }
-$secpass | ForEach-Object { secedit.exe /configure /db %windir%\securitynew.sdb /cfg %windir%\inf\defltbase.inf /areas SECURITYPOLICY /quiet /override /IF @('MinimumPasswordLength', 'PasswordComplexity', 'ClearTextPassword')=$true /IUSER=$true /IUNDEF=$true /IF $_ }
 
-# Lockout Policy
+# Set lockout policy settings
 $lockoutPolicy = @{
-    'LockoutDuration'      = '00:30:00'
-    'LockoutThreshold'     = 10
-    'ResetLockoutCounter'  = '00:30:00'
+    "LockoutDuration" = (New-TimeSpan -Minutes 30).TotalSeconds
+    "LockoutThreshold" = 10
+    "ResetLockoutCounterAfter" = (New-TimeSpan -Minutes 30).TotalSeconds
 }
+
+# Configure password policy using secedit
+$seceditTemplate = @"
+[Unicode]
+Unicode=yes
+[Version]
+signature="$CHICAGO$"
+Revision=1
+[Profile Description]
+Description=This policy configures security settings for a User.
+[System Access]
+MinimumPasswordLength = $($passwordPolicy["MinPasswordLength"])
+[Event Audit]
+[Event Audit\Account Logon]
+[Event Audit\Account Logon\Audit Credential Validation]
+"@
+
+# Apply the password policy settings
+$seceditTemplate | Out-File -FilePath "$env:TEMP\Secedit.inf" -Encoding Unicode
+secedit.exe /configure /db c:\windows\security\local.sdb /cfg "$env:TEMP\Secedit.inf"
+
+Write-Host "Password policy has been configured."
+
+# Set lockout policy settings
 $lockoutPolicy | ForEach-Object {
-    secedit.exe /configure /db %windir%\securitynew.sdb /cfg %windir%\inf\defltbase.inf /areas SECURITYPOLICY /quiet /override /IF @('LockoutDuration', 'LockoutThreshold', 'ResetLockoutCounter')=$true /IUSER=$true /IUNDEF=$true /IF $_
+    Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Services\MSWinloc" -Name $_.Key -Value $_.Value
 }
+
+Write-Host "Lockout policy has been configured."
 
 # Check user settings
-Get-WmiObject -Class Win32_UserAccount | ForEach-Object {
-    $_.PasswordChangeable = $true
-    $_.PasswordExpires = $true
-    $_.SetPassword('')  # Forces a password change at next logon
-    $_.Put()
+# Set 'User must change password at next logon' for all users
+Get-ADUser -Filter * | Set-AdUser -ChangePasswordAtLogon $true
+
+# Disable accounts for unauthorized users
+# Note: Replace "UnauthorizedUser1", "UnauthorizedUser2", etc., with actual unauthorized usernames
+$unauthorizedUsers = @("UnauthorizedUser1", "UnauthorizedUser2")
+foreach ($user in $unauthorizedUsers) {
+    Disable-ADAccount -Identity $user
 }
 
 # Use SmartScreen online services (Security and Maintenance) = ON
-Set-MpPreference -SubmitSamplesConsent 1
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -Value 1
 
-# Wi-Fi Sense (Network & Internet)
-Set-WiFiSense -AllowWiFiHotSpotReporting $false
-Set-WiFiSense -AllowOpenHotSpot $false
-Set-WiFiSense -AllowPaidHotSpot $false
+# Wi-Fi Sense settings
+# Automatically connect to suggested open hotspots = OFF
+# Automatically connect to hotspots temporarily to see if paid network services are available = OFF
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config" -Name "AutoConnectToPaidHotspots" -Value 0
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config" -Name "AutoConnectToOpenHotspots" -Value 0
 
 # Turn UAC to max (Change User Account Control Settings)
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'ConsentPromptBehaviorAdmin' -Value 5
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value 1
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "ConsentPromptBehaviorAdmin" -Value 5
 
-# Change Adapter settings (Disabling IPv6 and other services)
-$networkInterfaces = Get-NetAdapter
-$networkInterfaces | ForEach-Object {
-    Disable-NetAdapterBinding -Name $_.Name -ComponentID 'ms_msclient', 'ms_server', 'ms_tcpip6', 'ms_lltdio', 'ms_rspndr'
+# Change Adapter settings
+# Disable the specified services
+$servicesToDisable = @(
+    "Client for Microsoft Networks",
+    "File and Printer Sharing for Microsoft Networks",
+    "QoS Packet Scheduler",
+    "Microsoft Network Adapter Multiplexor Protocol",
+    "Microsoft LLDP Protocol Driver",
+    "Link-Layer Topology Discovery Mapper I/O Driver",
+    "Link-Layer Topology Discovery Responder"
+)
+
+foreach ($service in $servicesToDisable) {
+    Disable-NetAdapterBinding -Name "*" -ComponentID $service -Confirm:$false
 }
+
+# Disable Internet Protocol version 6
+Disable-NetAdapterBinding -Name "*" -ComponentID "ms_tcpip6"
+
+# Disable 'Register this connection's address in DNS' for IPv4
+Set-DnsClient -InterfaceIndex (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).InterfaceIndex -RegisterThisConnectionsAddress 0
+
+# Disable NETBIOS over TCP/IP on WINS tab for IPv4
+Set-WmiInstance -Class Win32_NetworkAdapterConfiguration -Filter "IPEnabled='True'" -Property @{WINSResolution=2}
 
 # Disable port 1900 UPnP
-New-Item -Path 'HKLM:\Software\Microsoft\DirectplayNATHelp' -Name 'DPNHUPnP' -Force
-New-ItemProperty -Path 'HKLM:\Software\Microsoft\DirectplayNATHelp\DPNHUPnP' -Name 'UPnPMode' -Value 2 -PropertyType DWord
+$regPath = "HKLM:\Software\Microsoft\DirectplayNATHelp\DPNHUPnP"
+$regName = "UPnPMode"
+$regValue = 2
 
-# Windows Services
-$services = @{
-    'upnphost'               = @{ Status = 'Stopped'; StartupType = 'Disabled' }
-    'Telnet'                 = @{ Status = 'Stopped'; StartupType = 'Disabled' }
-    'SNMPTRAP'               = @{ Status = 'Stopped'; StartupType = 'Disabled' }
-    'eventlog'               = @{ Status = 'Running'; StartupType = 'Automatic' }
-    'RemoteRegistry'         = @{ Status = 'Stopped'; StartupType = 'Disabled' }
+# Create a new DWORD value
+New-ItemProperty -Path $regPath -Name $regName -Value $regValue -PropertyType DWord -Force
+
+# Stop and disable Windows services
+$servicesToConfigure = @{
+    "upnphost" = @{Status = "Stopped"; StartupType = "Disabled"},
+    "TermService" = @{Status = "DependsOnREADME"; StartupType = "Manual"},
+    "Telnet" = @{Status = "Stopped"; StartupType = "Disabled"},
+    "SNMPTRAP" = @{Status = "Stopped"; StartupType = "Disabled"},
+    "Wecsvc" = @{Status = "Running"; StartupType = "Automatic"},
+    "RemoteRegistry" = @{Status = "Stopped"; StartupType = "Disabled"}
 }
 
-$services.GetEnumerator() | ForEach-Object {
-    Set-Service -Name $_.Key -Status $_.Value.Status -StartupType $_.Value.StartupType
+foreach ($service in $servicesToConfigure.GetEnumerator()) {
+    $serviceName = $service.Key
+    $status = $service.Value.Status
+    $startupType = $service.Value.StartupType
+
+    # Stop the service
+    Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+
+    # Set the startup type
+    Set-Service -Name $serviceName -StartupType $startupType -ErrorAction SilentlyContinue
+
+    # If the service is set to "Running," start the service
+    if ($status -eq "Running") {
+        Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+    }
 }
 
 # Check Windows features
-$featuresToDisable = @('TelnetClient', 'TelnetServer', 'SNMP', 'RIPListener', 'ClientForNFS', 'Web-Server')
-Disable-WindowsOptionalFeature -FeatureName $featuresToDisable -Online -NoRestart
+$featuresToDisable = @(
+    "TelnetClient",
+    "TelnetServer",
+    "SNMP",
+    "RIP Listener",
+    "NFS-Client",
+    "IIS-WebServer",
+    "IIS-WorldWideWebServices",
+    "TFTP-Client"
+)
 
-# Disable SMB v1
-Disable-WindowsOptionalFeature -FeatureName 'SMB1Protocol' -Online
-
-# Shares
-$allowedShares = @('ADMIN$', 'C$', 'IPC$')
-$existingShares = Get-SmbShare | Select-Object -ExpandProperty Name
-$sharesToRemove = $existingShares | Where-Object { $_ -notin $allowedShares }
-$sharesToRemove | ForEach-Object {
-    Remove-SmbShare -Name $_ -Force
+foreach ($feature in $featuresToDisable) {
+    Disable-WindowsOptionalFeature -Online -FeatureName $feature -NoRestart
 }
 
+# Disable SMB v1
+Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart
+
+# Only share specific folders
+$allowedShares = @("ADMIN$", "C$", "IPC$")
+
+# Remove existing shares not in the allowed list
+Get-SmbShare | Where-Object { $_.Name -notin $allowedShares } | Remove-SmbShare -Force
+
 # Firewall rules
-$rulesToDisable = @('MSEdge_In', 'Search_In', 'MSNMoney_In', 'MSNSports_In', 'MSNNews_In', 'MSNWeather_In', 'MicrosoftPhotos_In', 'Xbox_In')
-$rulesToDisable | ForEach-Object {
-    Disable-NetFirewallRule -DisplayName $_
+$rulesToDisable = @(
+    "MicrosoftEdge",
+    "CortanaListenUIApp",
+    "BingWeather",
+    "Microsoft.Xbox.App"
+)
+
+foreach ($rule in $rulesToDisable) {
+    Disable-NetFirewallRule -DisplayName $rule
 }
 
 # Turning off Tiles
-# Assuming you have a function to turn off tiles
-# Adjust as per your environment
-Turn-OffTiles
+# The script doesn't directly interact with the Start menu, as this is more user-specific.
+# You may guide the user to manually turn off Tiles by right-clicking on them.
 
 # Turn off AutoPlay
-Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers' -Name 'DisableAutoplay' -Value 1
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers" -Name "DisableAutoplay" -Value 1
 
-# Run the command “netplwiz”
-Start-Process -FilePath 'netplwiz' -Wait
+# Run the command "netplwiz"
+Start-Process "netplwiz" -Verb RunAs
 
-# Screen Saver
-# Settings…Personalize….Lock Screen...Screen Saver settings=wait 10 min and checkmark “On resume display Logon screen”
-Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\' -Name ScreenSaveActive -Value 1
-Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\' -Name ScreenSaveTimeOut -Value 600
+# Disable OneDrive on Startup
+# Using msconfig.exe to disable OneDrive on startup
+$msconfigPath = "C:\Windows\System32\msconfig.exe"
+Start-Process $msconfigPath -ArgumentList "/startup" -Verb RunAs
+
+# Screen Saver settings
+# Set screen saver settings to wait for 10 minutes and display logon screen on resume
+# Note: The script assumes that the registry key path and values are consistent across Windows versions.
+$screenSaverPath = "HKCU:\Control Panel\Desktop"
+Set-ItemProperty -Path $screenSaverPath -Name ScreenSaveActive -Value 1
+Set-ItemProperty -Path $screenSaverPath -Name ScreenSaveTimeOut -Value 600
+Set-ItemProperty -Path $screenSaverPath -Name ScreenSaverIsSecure -Value 1
 
 # Configure Auditing
 # Enable auditing for success and failure events
@@ -141,3 +228,5 @@ if ($defenderStatus -eq $true) {
 } else {
     Write-Host "Windows Defender is already enabled."
 }
+
+Write-Host "Configuration tasks completed."
