@@ -10,13 +10,10 @@ Copy and paste script into it
 OR
 
 DOWNLOAD SCRIPT OFF GITHUB
------------------------------------
+
 Give it big power
 chmod +x script.sh
 
 Run it using
 ./scriptname.sh
 
-OR
-
-D
