@@ -44,15 +44,17 @@ $lockoutPolicy | ForEach-Object {
 
 Write-Host "Lockout policy has been configured."
 
-# Check user settings
-# Set 'User must change password at next logon' for all users
-Get-ADUser -Filter * | Set-AdUser -ChangePasswordAtLogon $true
+# List of authorized users
+$authorizedUsers = @("AuthorizedUser1", "AuthorizedUser2", "AuthorizedUser3")
 
-# Disable accounts for unauthorized users
-# Note: Replace "UnauthorizedUser1", "UnauthorizedUser2", etc., with actual unauthorized usernames
-$unauthorizedUsers = @("UnauthorizedUser1", "UnauthorizedUser2")
-foreach ($user in $unauthorizedUsers) {
-    Disable-ADAccount -Identity $user
+# Get all users and compare with authorized users
+$allUsers = Get-ADUser -Filter *
+foreach ($user in $allUsers) {
+    $username = $user.SamAccountName
+    if (-not $authorizedUsers.Contains($username)) {
+        Disable-ADAccount -Identity $username
+        Write-Host "Disabled account for unauthorized user: $username"
+    }
 }
 
 # Use SmartScreen online services (Security and Maintenance) = ON
