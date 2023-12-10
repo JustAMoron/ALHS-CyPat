@@ -181,14 +181,6 @@ Start-Process "netplwiz" -Verb RunAs
 $msconfigPath = "C:\Windows\System32\msconfig.exe"
 Start-Process $msconfigPath -ArgumentList "/startup" -Verb RunAs
 
-# Screen Saver settings
-# Set screen saver settings to wait for 10 minutes and display logon screen on resume
-# Note: The script assumes that the registry key path and values are consistent across Windows versions.
-$screenSaverPath = "HKCU:\Control Panel\Desktop"
-Set-ItemProperty -Path $screenSaverPath -Name ScreenSaveActive -Value 1
-Set-ItemProperty -Path $screenSaverPath -Name ScreenSaveTimeOut -Value 600
-Set-ItemProperty -Path $screenSaverPath -Name ScreenSaverIsSecure -Value 1
-
 # Configure Auditing
 # Enable auditing for success and failure events
 $auditPolicy = @{
