@@ -13,7 +13,7 @@ DOWNLOAD SCRIPT OFF GITHUB
 
 Give it big power
 chmod +x script.sh
-
+dos2unix "filename"
 Run it using
 ./scriptname.sh
 
