@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# PRE SCRIPT INSTRUCTIONS:
+# 
+# CHANGE ROOT PASSWORD TO "password" FOR MARIADB THROUGH WEBMIN > LOGIN > SERVERS > MARIADB DB SERVER > USER PERMISSIONS > ROOT > SET TO > SAVE
+# 
+
+
+echo -en "ANSWER: 192.168.149.1\nANSWER: hamilton\nANSWER: beb9b920571f15e1beff26feb680cc41" > /home/hamilton/Desktop/Forensics_Question_1.txt
+echo -en "ANSWER: CVE-2022-36446\nANSWER: root,hamilton,schumacher,vettel\nANSWER: Software Package Updates" > /home/hamilton/Desktop/Forensics_Question_2.txt
+echo -en "ANSWER: /etc/rc2.d/S01libexec\nANSWER: /snap/bin/libexec" > /home/hamilton/Desktop/Forensics_Question_3.txt
+
+> /var/spool/cron/crontabs/root
+rm /etc/apt/trusted.gpg.d/archive-key.asc
+cat /etc/apt/sources.list.d/webmin.list | grep -v "kali" > /etc/apt/sources.list.d/webmin.list
+sed -i 's/\/tmp://g' /home/hamilton/.bashrc
+rm /snap/bin/libexec
+rm /etc/init.d/libexec
+rm /usr/games/gnome-solitaire.py
+
+userdel ide
+gpasswd -d leclerc adm
+sed -n 's/^prost:[^:]*:[^:]*:[^:]*:\([^:]*\):[^:]*:[^:]*$/\1/p' /etc/passwd | xargs -I {} sed -i 's/{}/,,,/g' /etc/passwd
+
+mkdir /uwu
+sed -i 's/127.0.0.53/1.1.1.1/g' /etc/resolv.conf
+wget "https://raw.githubusercontent.com/k4yt3x/sysctl/master/sysctl.conf" -O /uwu/sysctl.conf
+cat /uwu/sysctl.conf > /etc/sysctl.conf
+echo -e "\nnet.ipv4.icmp_echo_ignore_all = 1" >> /etc/sysctl.conf
+sysctl -p
+echo "* * * * * root sysctl -p" >> /etc/crontab
+
+systemctl start apparmor.service
+systemctl enable apparmor.service
+systemctl stop vsftpd
+systemctl disable vsftpd
+systemctl disable acpol.service
+systemctl stop acpol.service
+
+echo "#disable-user-list=true" >> /etc/gdm3/greeter.dconf-defaults
+echo "#bind-address = 127.0.0.1" >> /etc/mysql/mariadb.conf.d/50-server.cnf
+cat /etc/apache2/conf-available/serve-cgi-bin.conf | grep -v "authg" > /etc/apache2/conf-available/serve-cgi-bin.conf
+sed -i 's/Tokens OS/Tokens Prod/g' /etc/apache2/conf-available/security.conf
+echo "ServerName F1" >> /etc/apache2/apache2.conf
+
+echo "#debugfs=off" >> /etc/default/grub
+echo "#oops=panic" >> /etc/default/grub
+sed -i 's/auth       sufficient pam_wheel.so group=drivers trust/#auth       sufficient pam_wheel.so group=drivers trust/g' /etc/pam.d/su
+echo -e 'cat << EOF\nset superusers="hamilton"\npassword_pbkdf2 hamilton grub.pbkdf2.sha512.10000.A836C7B620E2D5F5AEC13109BF46601530D19E7616BD330169B8DDB1D7321961F48B84E679A60DF89F9FCAE519BC4F3512E3304C6A2714678D6C7692439E0BB1.6FCFF8DC1F6C5CC46F37A7EB49506B111AA2F2BB082659DEF9613DB180AC6055AAEAB5F15D47C297E006C5FDB926BA04C0D3176B0CAF2D5869050126151A9224\nEOF' >> /etc/grub.d/00_header # password is password
+update-grub
+
+#systemctl stop mariadb
+#mysqld_safe --skip-grant-tables --skip-networking &
+#echo -en "FLUSH PRIVILEGES;\nALTER USER 'root'@'localhost' IDENTIFIED BY 'password';\n" | mariadb -u root -ppassword
+
+# manually set the password for the root user to password in webmin for mariadb
+echo -en "USE f1;\nDROP TABLE drivers;\n" | mariadb -u root -ppassword
+echo -en "DELETE FROM mysql.user WHERE User='ide';\n" | mariadb -u root -ppassword
+# use webmin, it's easier than dealing with this :/
+
+
+wget "https://raw.githubusercontent.com/OpenVPN/openvpn/master/sample/sample-config-files/server.conf" -O /uwu/server.conf
+cp /uwu/server.conf /etc/openvpn/server/server.conf
+wget "https://raw.githubusercontent.com/OpenVPN/openvpn/master/sample/sample-config-files/client.conf" -O /uwu/client.conf
+cp /uwu/client.conf /etc/openvpn/client/client.conf
+touch /etc/apache2/sites-enabled/https.conf
+echo "<VirtualHost *:443>" > /etc/apache2/sites-enabled/https.conf
+echo "   ServerName F1" >> /etc/apache2/sites-enabled/https.conf
+echo '   DocumentRoot /var/www/https' >> /etc/apache2/sites-enabled/https.conf
+echo -e '   SSLEngine on\n   SSLCertificateFile /etc/ssl/certs/apache-selfsigned.crt\n   SSLCertificateKeyFile /etc/ssl/private/apache-selfsigned.key' >> /etc/apache2/sites-enabled/https.conf
+echo '</VirtualHost>' >> /etc/apache2/sites-enabled/https.conf
+echo -e '\n\n\n\n\n\n\n' | sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/apache-selfsigned.key -out /etc/ssl/certs/apache-selfsigned.crt
+echo -e '<VirtualHost *:80>\n    Redirect / https://f1/\n</VirtualHost>' > /etc/apache2/sites-available/http.conf
+systemctl reload apache2
+chown root:root /var/www/html 
+chown root:root /etc/securetty
+
+> /var/www/html/index.htm
+> /var/www/https/index.htm
+
+apt-get purge -y fcrackzip
+snap remove ksnakeduel
+pip uninstall netcat -y
+
+sed -i 's/yearly/weekly/g' /etc/logrotate.conf
+ufw enable
+ufw allow 'Apache Full'
+echo 'sysctl -p' >> /etc/profile
+
+sed -i 's/127.0.0.53/1.1.1.1/g' /etc/resolv.conf
+apt-get update -y
+apt-get upgrade apt -y
+apt-get upgrade gnome-shell -y
+apt-get purge webmin -y
+wget "https://github.com/webmin/webmin/releases/download/2.105/webmin_2.105_all.deb" -O /uwu/webmin_2.105_all.deb
+dpkg -i /uwu/webmin_2.105_all.deb # lol
+#reboot # fixes mariadb
+#apt-get upgrade
